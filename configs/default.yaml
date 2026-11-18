@@ -1,0 +1,31 @@
+project: vad_transformer
+seed: 42
+
+data:
+  dataset: ped2            # ped2 | avenue | shanghaitech | ucf_crime
+  img_size: 224            # frames are stored at 256 and resized on load
+  clip_len: 8              # input frames; target is the NEXT frame (causal)
+  target_stride: 1         # use every n-th target frame for training
+  val_fraction: 0.1        # fraction of NORMAL train videos held out (threshold + score stats)
+  batch_size: 16
+  num_workers: 2           # Colab has ~2 CPU cores
+  flow_mode: none          # none | precomputed | online   (use 'none' until flow is built)
+  flow_size: 128
+
+model:
+  name: dummy              # replaced by dual-branch transformer in later phases
+  hidden: 32
+
+train:
+  max_epochs: 30
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+  precision: "16-mixed"    # saves VRAM on Colab T4
+  grad_clip: 1.0
+  accumulate_grad_batches: 1
+  log_every_n_steps: 20
+  ckpt_every_n_epochs: 1
+
+paths:
+  drive_root: /content/drive/MyDrive/vad_project
+  local_root: /content/data

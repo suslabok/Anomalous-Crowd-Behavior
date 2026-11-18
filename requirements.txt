@@ -1,0 +1,13 @@
+torch
+torchvision
+pytorch-lightning>=2.2
+omegaconf
+timm
+opencv-python-headless
+albumentations
+scikit-learn
+torchmetrics
+scipy
+tensorboard
+tqdm
+pytest
