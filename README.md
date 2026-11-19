@@ -16,3 +16,10 @@ Every dataset becomes `processed/<dataset>/<split>/<video>/{meta.json, frames/*.
 at 256x256. A training sample is `clip [L,3,H,W]` (frames t-L..t-1), `target [3,H,W]` (frame t),
 optional `flow [L-1,2,F,F]`. Evaluation yields one sample per frame (start replicate-padded), so scoring
 is causal by construction. `meta.fps` is the EFFECTIVE fps, used to convert Δt to seconds.
+
+## Evaluation (Phase 2)
+`python scripts/evaluate.py --ckpt <run folder or .ckpt> --dataset ped2 --plots`
+- Frame score = mean of top-k patch errors, z-scored with NORMAL held-out source videos, causal trailing smoothing.
+- Alarm threshold = percentile of normal validation scores; fixed from the source dataset in zero-shot runs (`--source`).
+- Reports frame AUC (causal micro/macro + published-style per-video-normalised), pixel AUC, time-to-detection
+  (mean/median, detection rate, carry-over count, tolerance sensitivity), false alarms/hour, params/FLOPs/FPS.

@@ -11,3 +11,4 @@ scipy
 tensorboard
 tqdm
 pytest
+matplotlib

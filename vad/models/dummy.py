@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 
 
@@ -12,6 +11,6 @@ class DummyPredictor(nn.Module):
             nn.Conv2d(hidden, 3, 3, padding=1),
         )
 
-    def forward(self, clip):                      # clip: B,T,C,H,W
+    def forward(self, clip, flow=None):            # clip: B,T,C,H,W
         b, t, c, h, w = clip.shape
         return self.net(clip.reshape(b, t * c, h, w))

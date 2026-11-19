@@ -1,5 +1,6 @@
 project: vad_transformer
 seed: 42
+run_name: null        # null = <dataset>_<model>; set a new name for a fresh run (same name = resume)
 
 data:
   dataset: ped2            # ped2 | avenue | shanghaitech | ucf_crime
@@ -13,11 +14,13 @@ data:
   flow_size: 128
 
 model:
-  name: dummy              # replaced by dual-branch transformer in later phases
-  hidden: 32
+  name: unet               # unet (Phase 2 baseline) | dummy; dual-branch transformer comes in Phases 3-6
+  hidden: 32               # dummy only
+  base_channels: 32        # unet only
 
 train:
-  max_epochs: 30
+  max_epochs: 40
+  gdl_weight: 1.0          # weight of the gradient loss inside L_pred
   lr: 1.0e-4
   weight_decay: 1.0e-5
   precision: "16-mixed"    # saves VRAM on Colab T4
@@ -25,6 +28,16 @@ train:
   accumulate_grad_batches: 1
   log_every_n_steps: 20
   ckpt_every_n_epochs: 1
+
+eval:
+  patch: 16                # patch size in pixels at img_size (224 -> 14x14 patches)
+  topk: 10                 # frame score = mean of the top-k patch errors
+  smooth: 5                # causal trailing window, in frames
+  thr_percentile: 99.0     # alarm threshold = this percentile of NORMAL validation scores
+  min_consecutive: 1       # frames the score must stay above the threshold (counts toward delay)
+  tolerances: [0, 3, 5]    # onset tolerance (frames) for the delay sensitivity analysis
+  map_sigma: 4.0           # gaussian smoothing of pixel error maps (localization)
+  pixel_samples: 300000    # pixels sampled per video for pixel-level AUC
 
 paths:
   drive_root: /content/drive/MyDrive/vad_project
