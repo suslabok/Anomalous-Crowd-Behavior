@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import pytorch_lightning as pl
+from omegaconf import DictConfig, OmegaConf
 
 from vad.models import build_model
 
@@ -11,7 +12,10 @@ class VADLitModule(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
-        self.save_hyperparameters({"cfg": dict(cfg)} if not isinstance(cfg, dict) else {"cfg": cfg})
+        # Plain dict/list/number types only: DictConfig objects inside a checkpoint cannot be
+        # loaded by torch>=2.6 with its default weights_only=True.
+        cfg_plain = OmegaConf.to_container(cfg, resolve=True) if isinstance(cfg, DictConfig) else dict(cfg)
+        self.save_hyperparameters({"cfg": cfg_plain})
         self.model = build_model(cfg)
 
     def forward(self, clip):

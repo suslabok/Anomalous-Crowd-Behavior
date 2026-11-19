@@ -5,6 +5,7 @@
 Resumes automatically from the last checkpoint on Drive if one exists.
 """
 import argparse
+import inspect
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
@@ -43,7 +44,8 @@ def main():
     set_seed(cfg.seed)
     paths = get_paths(cfg)
 
-    run_name = f"{cfg.data.dataset}_{cfg.model.name}" + ("_smoke" if args.smoke else "")
+    # Same run name => same checkpoint folder => training RESUMES. Pass run_name=<new> for a fresh run.
+    run_name = (cfg.get("run_name") or f"{cfg.data.dataset}_{cfg.model.name}") + ("_smoke" if args.smoke else "")
     ckpt_dir = paths.checkpoints / run_name
 
     ckpt_cb = ModelCheckpoint(dirpath=ckpt_dir, save_last=True, save_top_k=1,
@@ -65,7 +67,10 @@ def main():
     print(f"[train] run={run_name} resume={resume}")
 
     train_dl, val_dl = get_loaders(cfg, paths, args.smoke)
-    trainer.fit(VADLitModule(cfg), train_dl, val_dl, ckpt_path=resume)
+    fit_kw = {}
+    if "weights_only" in inspect.signature(trainer.fit).parameters:
+        fit_kw["weights_only"] = False   # our own checkpoints; torch>=2.6 defaults to True
+    trainer.fit(VADLitModule(cfg), train_dl, val_dl, ckpt_path=resume, **fit_kw)
 
 
 if __name__ == "__main__":
