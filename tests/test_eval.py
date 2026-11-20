@@ -123,3 +123,45 @@ def test_plot_writes_png(tmp_path):
     v = dict(id="a", score=np.r_[np.zeros(22), 6 * np.ones(28)], labels=lab, alarm=_alarm(50, range(22, 50)))
     plot_score_curves([v, dict(v, id="b")], 5.0, tmp_path / "c.png")
     assert (tmp_path / "c.png").stat().st_size > 1000
+
+
+# ---------------------------------------------------------------- sweep
+def _synthetic_scores(tmp_path):
+    from vad.eval.sweep import save_scores
+    rng = np.random.RandomState(1)
+    val_raws = [1.0 + 0.1 * rng.randn(80) for _ in range(2)]
+    videos = []
+    for i in range(3):
+        raw = 1.0 + 0.1 * rng.randn(120)
+        raw[60 + 3:100] += 4.0
+        lab = np.zeros(120, int); lab[60:100] = 1
+        videos.append(dict(id=f"v{i}", raw=raw, labels=lab, fps=10.0))
+    p = tmp_path / "scores.npz"
+    save_scores(p, 8, ["a", "b"], val_raws, videos)
+    return p
+
+
+def test_scores_roundtrip_and_sweep(tmp_path):
+    from vad.eval.sweep import load_scores, pick_operating_points, run_sweep
+    p = _synthetic_scores(tmp_path)
+    val_raws, clip_len, videos = load_scores(p)
+    assert clip_len == 8 and len(val_raws) == 2 and [v["id"] for v in videos] == ["v0", "v1", "v2"]
+    assert videos[0]["labels"].sum() == 40 and videos[0]["fps"] == 10.0
+    rows = run_sweep(val_raws, clip_len, videos, smooths=(1, 5), min_consecs=(1, 3), percentiles=(99, 100), zs=(4, 60))
+    assert len(rows) == 2 * 2 * 4
+    easy = [r for r in rows if r["smooth"] == 1 and r["min_consecutive"] == 1 and r["rule"] == "z4"][0]
+    assert easy["detection_rate"] == 1.0 and easy["n_false_alarms"] == 0
+    harsh = [r for r in rows if r["smooth"] == 1 and r["min_consecutive"] == 1 and r["rule"] == "z60"][0]
+    assert harsh["detection_rate"] < 1.0                               # z60 is above the injected anomaly (~z40) -> missed
+    picks = pick_operating_points(rows, budgets=(0, 2))
+    assert picks[0]["n_false_alarms"] <= 0 and picks[0]["detection_rate"] == 1.0
+    json.dumps(clean(rows))
+
+
+def test_tradeoff_plot(tmp_path):
+    from vad.eval.plots import plot_tradeoff
+    from vad.eval.sweep import load_scores, run_sweep
+    val_raws, clip_len, videos = load_scores(_synthetic_scores(tmp_path))
+    rows = run_sweep(val_raws, clip_len, videos, smooths=(1,), min_consecs=(1,), percentiles=(99,), zs=(4, 8))
+    plot_tradeoff(rows, tmp_path / "t.png")
+    assert (tmp_path / "t.png").stat().st_size > 1000

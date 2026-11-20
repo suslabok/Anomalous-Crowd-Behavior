@@ -23,6 +23,7 @@ from vad.data.datasets import EvalVideo
 from vad.eval.metrics import PixelAcc, blur_maps
 from vad.eval.report import clean, summarize
 from vad.eval.runner import benchmark, predict_video
+from vad.eval.sweep import save_scores
 from vad.eval.scoring import causal_smooth, choose_threshold, fit_normalizer, topk_mean
 from vad.lit_module import VADLitModule
 from vad.utils.paths import get_paths
@@ -87,10 +88,11 @@ def main():
     norm = fit_normalizer([r[dc.clip_len:] for r in raws])
     thr = choose_threshold([causal_smooth(norm(r), ev.smooth)[dc.clip_len:] for r in raws], ev.thr_percentile)
     norm.save(out_dir / "normalizer.json")
+    val_raws = raws
     print(f"[eval] fitted on {len(val_ids)} normal videos {val_ids}: mean={norm.mean:.5f} std={norm.std:.5f} thr={thr:.3f}")
 
     # 2) score the target test videos
-    videos, pix = [], PixelAcc(ev.pixel_samples)
+    videos, pix, pix_anom = [], PixelAcc(ev.pixel_samples), PixelAcc(ev.pixel_samples)
     for v in list_videos(paths.processed, target, "test"):
         ds = make_ds(target, v, "test")
         if ds.labels is None:
@@ -99,11 +101,17 @@ def main():
         pe, maps = predict_video(model, ds, device, args.batch_size, ev.patch, masks is not None)
         videos.append(dict(id=v, raw=topk_mean(pe, ev.topk), labels=ds.labels, fps=ds.meta.fps))
         if masks is not None:
-            pix.add(blur_maps(maps, ev.map_sigma), masks)
+            blurred = blur_maps(maps, ev.map_sigma)
+            pix.add(blurred, masks)
+            anom = ds.labels > 0
+            if anom.any():
+                pix_anom.add(blurred[anom], masks[anom])
         print(f"  scored {v} ({len(ds)} frames)")
 
+    save_scores(out_dir / "scores.npz", dc.clip_len, val_ids, val_raws, videos)
     m = summarize(videos, norm, thr, ev.smooth, ev.min_consecutive, list(ev.tolerances))
-    m["pixel_auc"] = pix.auc()
+    m["pixel_auc"] = pix.auc()                       # all test frames pooled (background pixels make this easy)
+    m["pixel_auc_anomalous_frames"] = pix_anom.auc()  # only frames that contain an anomaly (harder, more informative)
     m["efficiency"] = benchmark(model, dc.clip_len, dc.img_size, device)
     m.update(source=source, target=target, ckpt=str(ckpt), eval_cfg=OmegaConf.to_container(ev),
              normalizer=dict(mean=norm.mean, std=norm.std))
@@ -121,7 +129,7 @@ def main():
     print("\n==== RESULTS", name, "====")
     print(f"frame AUC  micro(causal)={m['frame_auc_micro_causal']:.4f}  macro(causal)={m['frame_auc_macro_causal']:.4f}  "
           f"micro(per-video norm, published-style)={m['frame_auc_micro_pervideo_norm']:.4f}")
-    print(f"pixel AUC  {m['pixel_auc']:.4f}")
+    print(f"pixel AUC  all frames={m['pixel_auc']:.4f}  anomalous frames only={m['pixel_auc_anomalous_frames']:.4f}")
     print(f"detection  {d0['n_detected']}/{d0['n_segments']} segments, mean delay {d0['delay_frames_mean']:.1f} frames "
           f"({d0['delay_s_mean']:.2f} s), median {d0['delay_frames_median']:.1f} frames, carry-over={d0['n_carryover']}")
     print(f"false alarms {d0['n_false_alarms']} on {d0['normal_hours'] * 3600:.0f} s of normal footage "

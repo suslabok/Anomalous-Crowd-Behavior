@@ -23,3 +23,7 @@ is causal by construction. `meta.fps` is the EFFECTIVE fps, used to convert Δt 
 - Alarm threshold = percentile of normal validation scores; fixed from the source dataset in zero-shot runs (`--source`).
 - Reports frame AUC (causal micro/macro + published-style per-video-normalised), pixel AUC, time-to-detection
   (mean/median, detection rate, carry-over count, tolerance sensitivity), false alarms/hour, params/FLOPs/FPS.
+
+### Operating-point sweep
+`python scripts/sweep_operating_points.py --scores <results>/eval/<run>/scores.npz` (CPU, seconds) writes `sweep.csv`
+and `tradeoff.png`. It uses test labels, so it is analysis only: fix the reported operating point on normal validation data first.

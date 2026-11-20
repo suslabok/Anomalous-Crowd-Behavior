@@ -27,3 +27,20 @@ def plot_score_curves(videos, thr: float, path, max_videos: int = 12) -> None:
     fig.tight_layout()
     fig.savefig(path, dpi=110)
     plt.close(fig)
+
+
+def plot_tradeoff(rows, path) -> None:
+    """Delay and detection rate versus number of false alarms, one line per (smoothing, persistence)."""
+    fig, ax = plt.subplots(1, 2, figsize=(11, 4))
+    groups = {}
+    for r in rows:
+        groups.setdefault((r["smooth"], r["min_consecutive"]), []).append(r)
+    for (s, m), rs in sorted(groups.items()):
+        rs = sorted(rs, key=lambda r: (r["n_false_alarms"], r["threshold"]))
+        x = [r["n_false_alarms"] for r in rs]
+        ax[0].plot(x, [r["delay_frames_mean"] for r in rs], marker="o", ms=3, lw=0.8, label=f"smooth {s}, persist {m}")
+        ax[1].plot(x, [r["detection_rate"] for r in rs], marker="o", ms=3, lw=0.8)
+    ax[0].set_xlabel("false alarms on normal footage (count)"); ax[0].set_ylabel("mean delay (frames)")
+    ax[1].set_xlabel("false alarms on normal footage (count)"); ax[1].set_ylabel("detection rate")
+    ax[0].legend(fontsize=6, ncol=2)
+    fig.tight_layout(); fig.savefig(path, dpi=110); plt.close(fig)
