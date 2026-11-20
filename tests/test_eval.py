@@ -165,3 +165,12 @@ def test_tradeoff_plot(tmp_path):
     rows = run_sweep(val_raws, clip_len, videos, smooths=(1,), min_consecs=(1,), percentiles=(99,), zs=(4, 8))
     plot_tradeoff(rows, tmp_path / "t.png")
     assert (tmp_path / "t.png").stat().st_size > 1000
+
+
+def test_warmup_cosine_schedule():
+    from vad.utils.schedule import warmup_cosine as f
+    assert f(0, 10, 100) == pytest.approx(0.1) and f(9, 10, 100) == pytest.approx(1.0)
+    assert f(10, 10, 100) == pytest.approx(1.0) and f(100, 10, 100) == pytest.approx(0.0, abs=1e-9)
+    assert f(55, 10, 100) == pytest.approx(0.5, abs=1e-6)
+    assert f(500, 10, 100) == pytest.approx(0.0, abs=1e-9)            # never goes negative or rebounds
+    assert f(0, 0, 100) == pytest.approx(1.0)

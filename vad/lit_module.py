@@ -5,6 +5,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from vad.models import build_model
 from vad.models.losses import gradient_loss
+from vad.utils.schedule import warmup_cosine
 
 
 class VADLitModule(pl.LightningModule):
@@ -40,5 +41,11 @@ class VADLitModule(pl.LightningModule):
         return self._step(batch, "val")
 
     def configure_optimizers(self):
-        return torch.optim.AdamW(self.parameters(), lr=self.cfg.train.lr,
-                                 weight_decay=self.cfg.train.weight_decay)
+        tc = self.cfg.train
+        opt = torch.optim.AdamW(self.parameters(), lr=tc.lr, weight_decay=tc.weight_decay)
+        if tc.get("scheduler", "none") != "cosine":
+            return opt
+        total = int(self.trainer.estimated_stepping_batches)
+        warm = int(tc.get("warmup_steps", 300))
+        sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda step: warmup_cosine(step, warm, total))
+        return {"optimizer": opt, "lr_scheduler": {"scheduler": sched, "interval": "step"}}

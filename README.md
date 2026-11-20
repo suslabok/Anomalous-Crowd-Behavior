@@ -27,3 +27,8 @@ is causal by construction. `meta.fps` is the EFFECTIVE fps, used to convert Δt 
 ### Operating-point sweep
 `python scripts/sweep_operating_points.py --scores <results>/eval/<run>/scores.npz` (CPU, seconds) writes `sweep.csv`
 and `tradeoff.png`. It uses test labels, so it is analysis only: fix the reported operating point on normal validation data first.
+
+## Models
+- `unet`        Phase 2 baseline (conv U-Net, early fusion over time)
+- `spatial_vit` Phase 3: spatial Transformer branch + conv decoder; `model.spatial_frames=1` gives the last-frame-only ablation
+Train: `python train.py data.dataset=ped2 model.name=spatial_vit train.scheduler=cosine run_name=ped2_vit_spatial`

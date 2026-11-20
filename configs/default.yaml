@@ -17,9 +17,19 @@ model:
   name: unet               # unet (Phase 2 baseline) | dummy; dual-branch transformer comes in Phases 3-6
   hidden: 32               # dummy only
   base_channels: 32        # unet only
+  # spatial_vit (Phase 3)
+  patch: 16
+  embed_dim: 256
+  depth: 6
+  heads: 8
+  mlp_ratio: 4.0
+  spatial_frames: 8        # most recent frames stacked in the patch embedding (1 = last frame only)
+  residual: true           # predict the change from the last frame (zero-initialised output = copy-last-frame start)
 
 train:
   max_epochs: 40
+  scheduler: none          # none | cosine (linear warm-up then cosine decay)
+  warmup_steps: 300
   gdl_weight: 1.0          # weight of the gradient loss inside L_pred
   lr: 1.0e-4
   weight_decay: 1.0e-5
