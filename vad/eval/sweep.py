@@ -32,7 +32,7 @@ def load_scores(path):
 
 
 def run_sweep(val_raws, clip_len, videos, smooths=(1, 5, 9), min_consecs=(1, 3, 5),
-              percentiles=(95, 99, 99.5, 99.9, 100), zs=(4, 6, 8, 12, 16), tolerance=0) -> list[dict]:
+              percentiles=(80, 90, 95, 99, 99.5, 99.9, 100), zs=(2, 3, 4, 6, 8, 12, 16), tolerance=0) -> list[dict]:
     norm = fit_normalizer([r[clip_len:] for r in val_raws])
     rows = []
     for s in smooths:
@@ -40,14 +40,15 @@ def run_sweep(val_raws, clip_len, videos, smooths=(1, 5, 9), min_consecs=(1, 3, 
         rules = [(f"p{p}", choose_threshold(val_s, p)) for p in percentiles] + [(f"z{z}", float(z)) for z in zs]
         for m in min_consecs:
             for label, thr in rules:
-                res = summarize([dict(v) for v in videos], norm, thr, s, m, [tolerance])
+                res = summarize([dict(v) for v in videos], norm, thr, s, m, [tolerance], clip_len)
                 d = res["detection"][f"tol_{tolerance}"]
                 rows.append(dict(smooth=s, min_consecutive=m, rule=label, threshold=float(thr),
                                  frame_auc_micro=res["frame_auc_micro_causal"],
                                  detection_rate=d["detection_rate"], delay_frames_mean=d["delay_frames_mean"],
                                  delay_frames_median=d["delay_frames_median"], delay_s_mean=d["delay_s_mean"],
                                  n_false_alarms=d["n_false_alarms"], false_alarms_per_hour=d["false_alarms_per_hour"],
-                                 n_carryover=d["n_carryover"]))
+                                 n_carryover=d["n_carryover"], n_censored=d["n_censored"],
+                                 n_delay_segments=d["n_delay_segments"]))
     return rows
 
 

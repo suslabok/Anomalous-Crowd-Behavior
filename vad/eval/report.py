@@ -26,7 +26,7 @@ def clean(o):
     return o
 
 
-def summarize(videos, norm: Normalizer, thr: float, smooth: int, min_consecutive: int, tolerances) -> dict:
+def summarize(videos, norm: Normalizer, thr: float, smooth: int, min_consecutive: int, tolerances, warmup: int = 0) -> dict:
     """videos: list of dict(id, raw[T], labels[T], fps). Adds 'score' (normalized + causally smoothed)
     and 'alarm' to each dict in place and returns the metrics dict."""
     for v in videos:
@@ -40,15 +40,16 @@ def summarize(videos, norm: Normalizer, thr: float, smooth: int, min_consecutive
         frame_auc_micro_causal=frame_auc(scores, labels, "micro"),
         frame_auc_macro_causal=frame_auc(scores, labels, "macro"),
         frame_auc_micro_pervideo_norm=frame_auc(pervideo, labels, "micro"),
-        detection={f"tol_{t}": summarize_detection([v["alarm"] for v in videos], labels, [v["fps"] for v in videos], t)
+        detection={f"tol_{t}": summarize_detection([v["alarm"] for v in videos], labels, [v["fps"] for v in videos], t, warmup)
                    for t in tolerances},
     )
     per = []
     for v in videos:
-        recs = time_to_detection(v["alarm"], v["labels"], v["fps"], 0)
+        recs = time_to_detection(v["alarm"], v["labels"], v["fps"], 0, warmup)
         fa, hrs = false_alarms(v["alarm"], v["labels"], v["fps"], 0)
         per.append(dict(id=v["id"], n_frames=len(v["labels"]), auc=_auc(v["labels"], v["score"]),
                         n_segments=len(recs), n_detected=sum(r["detected"] for r in recs),
+                        segment_starts=[r["start"] for r in recs], censored=[r["censored"] for r in recs],
                         delay_frames=[r["delay_frames"] for r in recs], n_false_alarms=fa))
     m["per_video"] = per
     return m

@@ -174,3 +174,26 @@ def test_warmup_cosine_schedule():
     assert f(55, 10, 100) == pytest.approx(0.5, abs=1e-6)
     assert f(500, 10, 100) == pytest.approx(0.0, abs=1e-9)            # never goes negative or rebounds
     assert f(0, 0, 100) == pytest.approx(1.0)
+
+
+def test_segments_starting_inside_warmup_are_censored_from_delay_stats():
+    lab_a = np.zeros(60, int); lab_a[0:40] = 1        # anomaly already in progress when the video starts
+    lab_b = np.zeros(60, int); lab_b[20:50] = 1       # genuine onset at frame 20
+    al = [_alarm(60, [1]), _alarm(60, [26])]
+    d = M.summarize_detection(al, [lab_a, lab_b], [10.0, 10.0], warmup=8)
+    assert d["n_segments"] == 2 and d["n_detected"] == 2 and d["detection_rate"] == 1.0
+    assert d["n_censored"] == 1 and d["n_delay_segments"] == 1
+    assert d["delay_frames_mean"] == 6.0 and d["delay_frames_median"] == 6.0
+    d0 = M.summarize_detection(al, [lab_a, lab_b], [10.0, 10.0], warmup=0)       # old behaviour: artifact included
+    assert d0["n_censored"] == 0 and d0["delay_frames_mean"] == 3.5
+    r = M.time_to_detection(al[0], lab_a, 10.0, warmup=8)[0]
+    assert r["censored"] and r["delay_frames"] == 1 and not r["carryover"]
+
+
+def test_summarize_passes_warmup_and_reports_segment_starts():
+    lab = np.zeros(60, int); lab[0:30] = 1
+    v = dict(id="x", raw=np.r_[np.full(10, 9.0), np.full(50, 1.0)], labels=lab, fps=10.0)
+    m = summarize([v], S.Normalizer(1.0, 1.0), thr=3.0, smooth=1, min_consecutive=1, tolerances=[0], warmup=8)
+    assert m["detection"]["tol_0"]["n_censored"] == 1 and m["detection"]["tol_0"]["n_delay_segments"] == 0
+    assert m["per_video"][0]["segment_starts"] == [0] and m["per_video"][0]["censored"] == [True]
+    json.dumps(clean(m))

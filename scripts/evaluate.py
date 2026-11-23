@@ -109,7 +109,7 @@ def main():
         print(f"  scored {v} ({len(ds)} frames)")
 
     save_scores(out_dir / "scores.npz", dc.clip_len, val_ids, val_raws, videos)
-    m = summarize(videos, norm, thr, ev.smooth, ev.min_consecutive, list(ev.tolerances))
+    m = summarize(videos, norm, thr, ev.smooth, ev.min_consecutive, list(ev.tolerances), dc.clip_len)
     m["pixel_auc"] = pix.auc()                       # all test frames pooled (background pixels make this easy)
     m["pixel_auc_anomalous_frames"] = pix_anom.auc()  # only frames that contain an anomaly (harder, more informative)
     m["efficiency"] = benchmark(model, dc.clip_len, dc.img_size, device)
@@ -118,9 +118,9 @@ def main():
     (out_dir / "metrics.json").write_text(json.dumps(clean(m), indent=1))
     with open(out_dir / "per_video.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["video", "frames", "auc", "segments", "detected", "delay_frames", "false_alarms"])
+        w.writerow(["video", "frames", "auc", "segments", "segment_starts", "detected", "delay_frames", "censored", "false_alarms"])
         for p in m["per_video"]:
-            w.writerow([p["id"], p["n_frames"], p["auc"], p["n_segments"], p["n_detected"], p["delay_frames"], p["n_false_alarms"]])
+            w.writerow([p["id"], p["n_frames"], p["auc"], p["n_segments"], p["segment_starts"], p["n_detected"], p["delay_frames"], p["censored"], p["n_false_alarms"]])
     if args.plots:
         from vad.eval.plots import plot_score_curves
         plot_score_curves(videos, thr, out_dir / "curves.png")
@@ -130,7 +130,9 @@ def main():
     print(f"frame AUC  micro(causal)={m['frame_auc_micro_causal']:.4f}  macro(causal)={m['frame_auc_macro_causal']:.4f}  "
           f"micro(per-video norm, published-style)={m['frame_auc_micro_pervideo_norm']:.4f}")
     print(f"pixel AUC  all frames={m['pixel_auc']:.4f}  anomalous frames only={m['pixel_auc_anomalous_frames']:.4f}")
-    print(f"detection  {d0['n_detected']}/{d0['n_segments']} segments, mean delay {d0['delay_frames_mean']:.1f} frames "
+    print(f"detection  {d0['n_detected']}/{d0['n_segments']} segments detected "
+          f"({d0['n_censored']} start inside the first {dc.clip_len} frames: delay undefined, excluded from delay stats)")
+    print(f"delay      over {d0['n_delay_segments']} genuine onsets: mean {d0['delay_frames_mean']:.1f} frames "
           f"({d0['delay_s_mean']:.2f} s), median {d0['delay_frames_median']:.1f} frames, carry-over={d0['n_carryover']}")
     print(f"false alarms {d0['n_false_alarms']} on {d0['normal_hours'] * 3600:.0f} s of normal footage "
           f"({d0['false_alarms_per_hour']:.1f}/hour)")

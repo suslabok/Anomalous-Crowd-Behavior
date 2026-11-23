@@ -56,24 +56,29 @@ class PixelAcc:
 
 
 # ------------------------------------------------------------------ time to detection
-def time_to_detection(alarm, labels, fps: float, tolerance: int = 0) -> list[dict]:
+def time_to_detection(alarm, labels, fps: float, tolerance: int = 0, warmup: int = 0) -> list[dict]:
     """One record per annotated anomalous segment [s,e].
 
     Detection = first frame t with alarm[t] in [s - tolerance, e]. Delay = t - s (frames), signed only
     when tolerance > 0. With tolerance 0 an alarm before the onset is NOT a negative delay (it is a false
     alarm, see false_alarms()). `carryover` marks detections where the alarm was already on just before
-    the window, i.e. a pre-onset alarm that persisted into the segment (delay is then optimistic)."""
+    the window, i.e. a pre-onset alarm that persisted into the segment (delay is then optimistic).
+    `censored` marks segments that start inside the first `warmup` frames: the anomaly is already in progress
+    when the video starts (or before the model has any history), so there is no onset to be late for. Such
+    segments count toward the detection rate but are excluded from delay statistics."""
     alarm = np.asarray(alarm, dtype=bool)
     out = []
     for s, e in segments_from_labels(labels):
         lo = max(0, s - tolerance)
         hits = np.flatnonzero(alarm[lo:e + 1])
         if len(hits) == 0:
-            out.append(dict(start=s, end=e, detected=False, delay_frames=None, delay_s=None, carryover=False))
+            out.append(dict(start=s, end=e, detected=False, delay_frames=None, delay_s=None, carryover=False,
+                            censored=bool(s < warmup)))
             continue
         t = lo + int(hits[0])
+        cens = bool(s < warmup)
         out.append(dict(start=s, end=e, detected=True, delay_frames=t - s, delay_s=(t - s) / fps,
-                        carryover=bool(t == lo and lo > 0 and alarm[lo - 1])))
+                        carryover=bool(t == lo and lo > 0 and alarm[lo - 1]) and not cens, censored=cens))
     return out
 
 
@@ -89,20 +94,22 @@ def false_alarms(alarm, labels, fps: float, tolerance: int = 0) -> tuple[int, fl
     return int((edges & normal).sum()), float(normal.sum() / fps / 3600.0)
 
 
-def summarize_detection(alarms, labels_list, fps_list, tolerance: int = 0) -> dict:
+def summarize_detection(alarms, labels_list, fps_list, tolerance: int = 0, warmup: int = 0) -> dict:
     recs, n_fa, hours = [], 0, 0.0
     for a, l, f in zip(alarms, labels_list, fps_list):
-        recs += time_to_detection(a, l, f, tolerance)
+        recs += time_to_detection(a, l, f, tolerance, warmup)
         fa, h = false_alarms(a, l, f, tolerance)
         n_fa += fa; hours += h
     det = [r for r in recs if r["detected"]]
-    fr = [r["delay_frames"] for r in det]
-    sec = [r["delay_s"] for r in det]
+    dly = [r for r in det if not r["censored"]]            # genuine onsets only
+    fr = [r["delay_frames"] for r in dly]
+    sec = [r["delay_s"] for r in dly]
     nan = float("nan")
     return dict(n_segments=len(recs), n_detected=len(det),
                 detection_rate=len(det) / len(recs) if recs else nan,
                 delay_frames_mean=float(np.mean(fr)) if fr else nan, delay_frames_median=float(np.median(fr)) if fr else nan,
                 delay_s_mean=float(np.mean(sec)) if sec else nan, delay_s_median=float(np.median(sec)) if sec else nan,
-                n_carryover=sum(r["carryover"] for r in det),
+                n_censored=sum(r["censored"] for r in recs), n_delay_segments=len(dly),
+                n_carryover=sum(r["carryover"] for r in dly),
                 n_false_alarms=n_fa, normal_hours=hours,
                 false_alarms_per_hour=n_fa / hours if hours > 0 else nan)

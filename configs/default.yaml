@@ -45,7 +45,7 @@ eval:
   smooth: 5                # causal trailing window, in frames
   thr_percentile: 99.0     # alarm threshold = this percentile of NORMAL validation scores
   min_consecutive: 1       # frames the score must stay above the threshold (counts toward delay)
-  tolerances: [0, 3, 5]    # onset tolerance (frames) for the delay sensitivity analysis
+  tolerances: [0, 5, 10, 20]  # onset tolerance (frames) for the delay sensitivity analysis
   map_sigma: 4.0           # gaussian smoothing of pixel error maps (localization)
   pixel_samples: 300000    # pixels sampled per video for pixel-level AUC
 
