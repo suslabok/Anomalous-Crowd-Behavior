@@ -69,6 +69,7 @@ def time_to_detection(alarm, labels, fps: float, tolerance: int = 0, warmup: int
     alarm = np.asarray(alarm, dtype=bool)
     out = []
     for s, e in segments_from_labels(labels):
+        # Window in which an alarm counts as detecting this segment (it starts `tolerance` frames early).
         lo = max(0, s - tolerance)
         hits = np.flatnonzero(alarm[lo:e + 1])
         if len(hits) == 0:
@@ -82,14 +83,17 @@ def time_to_detection(alarm, labels, fps: float, tolerance: int = 0, warmup: int
     return out
 
 
-def false_alarms(alarm, labels, fps: float, tolerance: int = 0) -> tuple[int, float]:
+def false_alarms(alarm, labels, fps: float, tolerance: int = 0, warmup: int = 0) -> tuple[int, float]:
     """(#alarm events on normal footage, hours of normal footage). An event is a rising edge of the alarm
-    signal. Frames within `tolerance` before an annotated onset are not counted as normal."""
+    signal. Frames within `tolerance` before an annotated onset are not counted as normal, and neither are the
+    first `warmup` frames (the detector is not armed yet: its clips there are replicate-padded)."""
     alarm = np.asarray(alarm, dtype=bool)
     labels = np.asarray(labels) > 0
     normal = ~labels
     for s, _ in segments_from_labels(labels):
         normal[max(0, s - tolerance):s] = False
+    normal[:warmup] = False
+    # One alarm event = the moment the alarm switches on, so a long alarm counts once.
     edges = alarm & ~np.concatenate([[False], alarm[:-1]])
     return int((edges & normal).sum()), float(normal.sum() / fps / 3600.0)
 
@@ -98,7 +102,7 @@ def summarize_detection(alarms, labels_list, fps_list, tolerance: int = 0, warmu
     recs, n_fa, hours = [], 0, 0.0
     for a, l, f in zip(alarms, labels_list, fps_list):
         recs += time_to_detection(a, l, f, tolerance, warmup)
-        fa, h = false_alarms(a, l, f, tolerance)
+        fa, h = false_alarms(a, l, f, tolerance, warmup)
         n_fa += fa; hours += h
     det = [r for r in recs if r["detected"]]
     dly = [r for r in det if not r["censored"]]            # genuine onsets only

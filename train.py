@@ -25,6 +25,7 @@ def get_loaders(cfg, paths, smoke):
         ds = lambda n: DummyClips(n, cfg.data.clip_len, 64)
         return DataLoader(ds(64), shuffle=True, **kw), DataLoader(ds(16), **kw)
     from vad.data.datasets import build_train_val
+    # Validation clips come from held-out NORMAL training videos, never from test videos.
     train, val, val_ids = build_train_val(cfg, paths)
     print(f"[data] {cfg.data.dataset}: {len(train)} train clips, "
           f"{len(val) if val else 0} val clips from held-out normal videos {val_ids}")
@@ -48,9 +49,11 @@ def main():
     run_name = (cfg.get("run_name") or f"{cfg.data.dataset}_{cfg.model.name}") + ("_smoke" if args.smoke else "")
     ckpt_dir = paths.checkpoints / run_name
 
+    # Keep last.ckpt (used to resume) and the checkpoint with the lowest validation loss.
     ckpt_cb = ModelCheckpoint(dirpath=ckpt_dir, save_last=True, save_top_k=1,
                               monitor="val/loss", mode="min",
                               every_n_epochs=cfg.train.ckpt_every_n_epochs)
+    # 16-bit mixed precision saves GPU memory on Colab (the smoke test uses 32-bit).
     trainer = pl.Trainer(
         max_epochs=cfg.train.max_epochs,
         accelerator="auto", devices=1,
@@ -62,6 +65,7 @@ def main():
         callbacks=[ckpt_cb, LearningRateMonitor("epoch")],
     )
 
+    # If an earlier run left last.ckpt on Drive, continue from it (this is what survives Colab disconnects).
     last = ckpt_dir / "last.ckpt"
     resume = str(last) if last.exists() else None
     print(f"[train] run={run_name} resume={resume}")

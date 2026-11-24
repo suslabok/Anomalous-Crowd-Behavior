@@ -20,6 +20,7 @@ class TrainClips(Dataset):
                  flow_mode="none", flow_root=None, flow_size=128, split="train"):
         self.stores = [VideoStore(processed_root, dataset, split, v, clip_len, img_size,
                                   flow_mode, flow_root, flow_size) for v in video_ids]
+        # One sample per (video, target frame). The input is the frames BEFORE the target, so the model never sees the future.
         self.index = [(i, int(t)) for i, s in enumerate(self.stores)
                       for t in train_targets(s.num_frames, clip_len, target_stride)]
 
@@ -46,6 +47,7 @@ class EvalVideo(Dataset):
 
     def __getitem__(self, t):
         d = self.store.get_clip(t)
+        # Attach the frame label (0 = normal, 1 = anomalous) so evaluation can score each frame.
         if self.labels is not None:
             d["label"] = np.int64(self.labels[t])
         return _tensors(d)

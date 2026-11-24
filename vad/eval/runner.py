@@ -30,15 +30,17 @@ def predict_video(model, ds, device, batch_size: int = 32, patch: int = 16, keep
 
 
 @torch.no_grad()
-def benchmark(model, clip_len: int, img_size: int, device, n: int = 30) -> dict:
-    """Model-only speed (batch of 1 frame-prediction), params and FLOPs per prediction."""
+def benchmark(model, clip_len: int, img_size: int, device, n: int = 30, flow_size: int = 128) -> dict:
+    """Model-only speed (batch of 1 frame-prediction), params and FLOPs per prediction. Excludes the cost of
+    computing optical flow (report that separately); a zero flow tensor is fed to flow-based models."""
     model.eval()
     x = torch.rand(1, clip_len, 3, img_size, img_size, device=device)
+    flow = torch.zeros(1, clip_len - 1, 2, flow_size, flow_size, device=device)
     use_amp = device.type == "cuda"
 
     def run():
         with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
-            return model(x, None)
+            return model(x, flow)
 
     for _ in range(5):
         run()
@@ -55,7 +57,7 @@ def benchmark(model, clip_len: int, img_size: int, device, n: int = 30) -> dict:
     try:
         from torch.utils.flop_counter import FlopCounterMode
         with FlopCounterMode(display=False) as fc:
-            model(x.float(), None)
+            model(x.float(), flow)
         out["flops"] = int(fc.get_total_flops())
     except Exception:
         pass

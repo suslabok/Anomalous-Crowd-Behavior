@@ -34,6 +34,7 @@ class SpatialPredictor(nn.Module):
 
     def forward(self, clip, flow=None):               # clip: B,T,C,H,W ; flow unused until Phase 4
         b, t, c, h, w = clip.shape
+        # Stack the latest frames, cut them into patches, and let the Transformer relate the patches to each other.
         tokens = self.branch(clip[:, -self.k:].reshape(b, self.k * c, h, w))      # B,N,D
         g = self.branch.grid
         y = self.out(self.decoder(tokens.transpose(1, 2).reshape(b, -1, g, g)))

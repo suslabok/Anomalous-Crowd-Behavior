@@ -85,6 +85,7 @@ def main():
     for v in val_ids:
         pe, _ = predict_video(model, make_ds(source, v, "train"), device, args.batch_size, ev.patch, False)
         raws.append(topk_mean(pe, ev.topk))
+    # Calibrate on held-out NORMAL video only: score statistics (z-scoring) and the alarm threshold.
     norm = fit_normalizer([r[dc.clip_len:] for r in raws])
     thr = choose_threshold([causal_smooth(norm(r), ev.smooth)[dc.clip_len:] for r in raws], ev.thr_percentile)
     norm.save(out_dir / "normalizer.json")
@@ -102,8 +103,10 @@ def main():
         videos.append(dict(id=v, raw=topk_mean(pe, ev.topk), labels=ds.labels, fps=ds.meta.fps))
         if masks is not None:
             blurred = blur_maps(maps, ev.map_sigma)
-            pix.add(blurred, masks)
+            w = dc.clip_len                                  # skip the warm-up frames (padded clips)
+            pix.add(blurred[w:], masks[w:])
             anom = ds.labels > 0
+            anom[:w] = False
             if anom.any():
                 pix_anom.add(blurred[anom], masks[anom])
         print(f"  scored {v} ({len(ds)} frames)")
@@ -112,7 +115,7 @@ def main():
     m = summarize(videos, norm, thr, ev.smooth, ev.min_consecutive, list(ev.tolerances), dc.clip_len)
     m["pixel_auc"] = pix.auc()                       # all test frames pooled (background pixels make this easy)
     m["pixel_auc_anomalous_frames"] = pix_anom.auc()  # only frames that contain an anomaly (harder, more informative)
-    m["efficiency"] = benchmark(model, dc.clip_len, dc.img_size, device)
+    m["efficiency"] = benchmark(model, dc.clip_len, dc.img_size, device, flow_size=dc.flow_size)
     m.update(source=source, target=target, ckpt=str(ckpt), eval_cfg=OmegaConf.to_container(ev),
              normalizer=dict(mean=norm.mean, std=norm.std))
     (out_dir / "metrics.json").write_text(json.dumps(clean(m), indent=1))

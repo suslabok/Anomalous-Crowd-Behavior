@@ -108,3 +108,110 @@ def test_spatial_vit_trains_and_gradients_reach_the_transformer():
     assert torch.isfinite(loss)
     assert lit.model.branch.patch_embed.weight.grad.abs().sum() > 0           # zero-init head no longer blocks gradients
     assert not _has_dictconfig(dict(lit.hparams))
+
+
+# ---------------------------------------------------------------- Phase 4: temporal branch, fusion, dual model
+def test_cross_attention_shapes_and_rows_sum_to_one():
+    from vad.models.vit import CrossAttention
+    ca = CrossAttention(32, 4)
+    ca.keep_attn = True
+    y = ca(torch.rand(2, 5, 32), torch.rand(2, 7, 32))
+    assert y.shape == (2, 5, 32) and ca.last_attn.shape == (2, 4, 5, 7)
+    assert torch.allclose(ca.last_attn.sum(-1), torch.ones(2, 4, 5), atol=1e-4)
+
+
+def test_cross_attention_paths_agree():
+    from vad.models.vit import CrossAttention
+    ca = CrossAttention(16, 2).eval()
+    x, c = torch.rand(2, 4, 16), torch.rand(2, 6, 16)
+    with torch.no_grad():
+        fast = ca(x, c)
+        ca.keep_attn = True
+        slow = ca(x, c)
+    assert torch.allclose(fast, slow, atol=1e-5)
+
+
+def test_temporal_branch_shape_and_time_order_sensitivity():
+    from vad.models.temporal import TemporalBranch
+    t = TemporalBranch(img_size=64, patch=16, in_ch=2, steps=3, embed_dim=32, depth=1, heads=4).eval()
+    x = torch.rand(2, 3, 2, 64, 64)
+    with torch.no_grad():
+        a = t(x)
+        assert a.shape == (2, 16, 32)
+        t.tpos.data.normal_(0, 1.0)                       # make the time embedding clearly non-trivial
+        assert not torch.allclose(t(x), t(x.flip(1)), atol=1e-5)    # reversing time changes the motion tokens
+
+
+def _dual(temporal_input="flow", residual=True):
+    from vad.models.dual_predictor import DualBranchPredictor
+    return DualBranchPredictor(img_size=64, patch=16, clip_len=4, embed_dim=32, depth_spatial=1, depth_temporal=1,
+                               depth_fusion=1, heads=4, mlp_ratio=2.0, spatial_frames=1,
+                               temporal_input=temporal_input, flow_scale=12.0, residual=residual)
+
+
+def test_dual_shapes_and_copy_last_frame_at_init():
+    m = _dual("flow").eval()
+    clip, flow = torch.rand(2, 4, 3, 64, 64), torch.randn(2, 3, 2, 32, 32)
+    with torch.no_grad():
+        y = m(clip, flow)
+    assert y.shape == (2, 3, 64, 64) and torch.allclose(y, clip[:, -1], atol=1e-6)
+
+
+def test_dual_flow_requirement_and_diff_mode():
+    clip = torch.rand(2, 4, 3, 64, 64)
+    with pytest.raises(ValueError):
+        _dual("flow").eval()(clip)                                        # flow model without flow -> clear error
+    with torch.no_grad():
+        assert _dual("diff").eval()(clip).shape == (2, 3, 64, 64)         # frame differences need no flow
+        assert _dual("both").eval()(clip, torch.randn(2, 3, 2, 32, 32)).shape == (2, 3, 64, 64)
+        assert _dual("flow", residual=False).eval()(clip, torch.randn(2, 3, 2, 32, 32)).shape == (2, 3, 64, 64)
+
+
+def test_build_model_guards_missing_flow():
+    from vad.models import build_model
+    cfg = OmegaConf.load("configs/default.yaml")
+    cfg.model.name, cfg.data.flow_mode = "dual_branch", "none"
+    with pytest.raises(ValueError):
+        build_model(cfg)
+    cfg.model.temporal_input = "diff"
+    assert build_model(cfg) is not None
+
+
+def test_dual_trains_both_branches_and_uses_flow():
+    from vad.lit_module import VADLitModule
+    cfg = OmegaConf.load("configs/default.yaml")
+    cfg.model.name, cfg.model.embed_dim, cfg.model.depth, cfg.model.heads, cfg.model.mlp_ratio = "dual_branch", 32, 1, 4, 2.0
+    cfg.model.depth_temporal, cfg.model.depth_fusion = 1, 1
+    cfg.data.clip_len, cfg.data.img_size, cfg.data.flow_mode = 4, 64, "precomputed"
+    lit = VADLitModule(cfg)
+    opt = torch.optim.SGD(lit.parameters(), lr=0.1)
+    batch = {"clip": torch.rand(4, 4, 3, 64, 64), "target": torch.rand(4, 3, 64, 64), "flow": torch.randn(4, 3, 2, 32, 32)}
+    for _ in range(3):
+        opt.zero_grad()
+        loss = lit.training_step(batch, 0)
+        loss.backward()
+        opt.step()
+    assert torch.isfinite(loss)
+    assert lit.model.temporal.patch_embed.weight.grad.abs().sum() > 0         # motion branch receives gradient
+    assert lit.model.spatial.patch_embed.weight.grad.abs().sum() > 0          # appearance branch receives gradient
+    lit.eval()
+    with torch.no_grad():
+        y1 = lit.model(batch["clip"], batch["flow"])
+        y0 = lit.model(batch["clip"], torch.zeros_like(batch["flow"]))
+    assert (y1 - y0).abs().max().item() > 0                                   # the flow input actually matters
+    assert not _has_dictconfig(dict(lit.hparams))
+
+
+def test_set_keep_attn_reaches_every_attention_module():
+    m = _dual("diff").eval()
+    m.set_keep_attn(True)
+    with torch.no_grad():
+        m(torch.rand(1, 4, 3, 64, 64))
+    stored = [mod.last_attn for mod in m.modules() if hasattr(mod, "keep_attn")]
+    assert len(stored) >= 6 and all(a is not None for a in stored)
+
+
+def test_benchmark_feeds_flow_to_flow_models():
+    from vad.eval.runner import benchmark
+    b = benchmark(_dual("flow"), 4, 64, torch.device("cpu"), n=1, flow_size=32)
+    assert b["params"] > 0 and b["fps"] > 0

@@ -72,6 +72,7 @@ class VideoStore:
         out = np.zeros((len(idx) - 1, 2, self.flow_size, self.flow_size), np.float32)
         for k in range(len(idx) - 1):
             a, b = int(idx[k]), int(idx[k + 1])
+            # Repeated (padded) frames have no motion, so their flow stays zero.
             if b != a + 1:
                 continue
             if self.flow_mode == "precomputed":
@@ -83,6 +84,7 @@ class VideoStore:
 
     # ---- clips ----
     def get_clip(self, t: int) -> dict:
+        # Input frames are all before t (causal); near the video start the first frame is repeated.
         idx = clip_frame_indices(t, self.clip_len, self.num_frames)
         d = {"clip": np.stack([self.read_frame(int(i)) for i in idx]),
              "target": self.read_frame(t),

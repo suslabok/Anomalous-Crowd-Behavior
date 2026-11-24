@@ -32,3 +32,13 @@ and `tradeoff.png`. It uses test labels, so it is analysis only: fix the reporte
 - `unet`        Phase 2 baseline (conv U-Net, early fusion over time)
 - `spatial_vit` Phase 3: spatial Transformer branch + conv decoder; `model.spatial_frames=1` gives the last-frame-only ablation
 Train: `python train.py data.dataset=ped2 model.name=spatial_vit train.scheduler=cosine run_name=ped2_vit_spatial`
+
+### Warm-up / arming rule
+The first `data.clip_len` frames of every video are scored from replicate-padded clips, which the model never sees in
+training. Evaluation therefore treats the detector as "not armed" until it has a full clip of real history: alarms are
+suppressed, and those frames are excluded from AUC, pixel AUC and the normal-footage hours. Segments that begin inside
+the warm-up are counted as detected/missed but excluded from delay statistics.
+- `dual_branch` Phase 4: spatial ViT (appearance) + temporal divided space-time attention (motion) + bidirectional cross-attention fusion.
+  `model.temporal_input=flow|diff|both` is the with/without optical flow ablation. Needs flow for `flow`/`both`:
+  `python -m vad.data.flow ped2` then `data.flow_mode=precomputed` (the flow cache lives on local disk: rebuild each Colab session).
+Train: `python train.py data.dataset=ped2 model.name=dual_branch data.flow_mode=precomputed train.scheduler=cosine run_name=ped2_dual`

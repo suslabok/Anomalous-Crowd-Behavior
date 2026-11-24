@@ -21,12 +21,15 @@ class VADLitModule(pl.LightningModule):
         self.model = build_model(cfg)
 
     def forward(self, clip, flow=None):
+        # `flow` is optional: models that do not use optical flow simply ignore it.
         return self.model(clip, flow)
 
     def _step(self, batch, stage):
+        # Predict the next frame from the previous frames, then measure how wrong the prediction is.
         pred = self(batch["clip"], batch.get("flow"))
         l_int = F.mse_loss(pred, batch["target"])
         l_grad = gradient_loss(pred, batch["target"])
+        # Pixel error keeps colours right; gradient error keeps edges sharp.
         loss = l_int + self.cfg.train.gdl_weight * l_grad
         on_step = stage == "train"
         self.log(f"{stage}/loss", loss, prog_bar=True, on_epoch=True, on_step=on_step)
@@ -43,6 +46,7 @@ class VADLitModule(pl.LightningModule):
     def configure_optimizers(self):
         tc = self.cfg.train
         opt = torch.optim.AdamW(self.parameters(), lr=tc.lr, weight_decay=tc.weight_decay)
+        # Optional learning-rate schedule: warm up first, then decay along a cosine curve.
         if tc.get("scheduler", "none") != "cosine":
             return opt
         total = int(self.trainer.estimated_stepping_batches)

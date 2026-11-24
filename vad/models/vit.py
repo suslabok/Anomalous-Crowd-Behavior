@@ -65,3 +65,27 @@ class SpatialBranch(nn.Module):
     def attention_maps(self):
         """List (one per block) of [B, heads, N, N] from the last forward pass with keep_attn on."""
         return [blk.attn.last_attn for blk in self.blocks]
+
+
+class CrossAttention(nn.Module):
+    """Queries come from x, keys/values from ctx. Used for appearance<->motion fusion and temporal pooling."""
+
+    def __init__(self, dim, heads, attn_drop=0.0):
+        super().__init__()
+        assert dim % heads == 0
+        self.h, self.drop = heads, attn_drop
+        self.q, self.kv, self.proj = nn.Linear(dim, dim), nn.Linear(dim, dim * 2), nn.Linear(dim, dim)
+        self.keep_attn, self.last_attn = False, None
+
+    def forward(self, x, ctx):
+        b, n, d = x.shape
+        m = ctx.shape[1]
+        q = self.q(x).reshape(b, n, self.h, d // self.h).transpose(1, 2)
+        k, v = self.kv(ctx).reshape(b, m, 2, self.h, d // self.h).permute(2, 0, 3, 1, 4)
+        if self.keep_attn:
+            a = ((q @ k.transpose(-2, -1)) * q.shape[-1] ** -0.5).softmax(-1)
+            self.last_attn = a.detach()
+            out = a @ v
+        else:
+            out = F.scaled_dot_product_attention(q, k, v, dropout_p=self.drop if self.training else 0.0)
+        return self.proj(out.transpose(1, 2).reshape(b, n, d))

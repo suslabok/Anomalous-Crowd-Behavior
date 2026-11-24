@@ -27,6 +27,7 @@ class UNetPredictor(nn.Module):
     def forward(self, clip, flow=None):            # clip: B,T,C,H,W ; flow ignored by this baseline
         bsz, t, c, h, w = clip.shape
         x = clip.reshape(bsz, t * c, h, w)
+        # Encoder: shrink the image step by step while collecting features. The decoder below upsamples and reuses them (skip connections).
         e1 = self.enc1(x)
         e2 = self.enc2(self.pool(e1))
         e3 = self.enc3(self.pool(e2))

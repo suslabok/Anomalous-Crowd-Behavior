@@ -197,3 +197,27 @@ def test_summarize_passes_warmup_and_reports_segment_starts():
     assert m["detection"]["tol_0"]["n_censored"] == 1 and m["detection"]["tol_0"]["n_delay_segments"] == 0
     assert m["per_video"][0]["segment_starts"] == [0] and m["per_video"][0]["censored"] == [True]
     json.dumps(clean(m))
+
+
+def test_alarms_are_suppressed_and_excluded_during_warmup():
+    raw = np.r_[np.full(5, 50.0), np.ones(55)]            # one huge spike, only inside the first 8 frames
+    lab = np.zeros(60, int); lab[40:50] = 1
+    v = dict(id="x", raw=raw, labels=lab, fps=10.0)
+    norm = S.Normalizer(1.0, 1.0)
+    m0 = summarize([dict(v)], norm, 3.0, 1, 1, [0], warmup=0)
+    m8 = summarize([dict(v)], norm, 3.0, 1, 1, [0], warmup=8)
+    assert m0["detection"]["tol_0"]["n_false_alarms"] == 1                       # old behaviour: spurious alarm
+    d = m8["detection"]["tol_0"]
+    assert d["n_false_alarms"] == 0 and d["n_detected"] == 0
+    assert d["normal_hours"] == pytest.approx(42 / 10 / 3600)                    # 60 - 10 anomalous - 8 warm-up
+    assert m0["frame_auc_micro_causal"] < 0.5 and m8["frame_auc_micro_causal"] == pytest.approx(0.5)
+    assert m8["n_frames"] == 52 and m8["warmup"] == 8
+
+
+def test_detector_arms_after_warmup_and_can_still_detect_early_segments():
+    lab = np.zeros(40, int); lab[0:30] = 1                # anomaly in progress at the start
+    raw = np.r_[np.full(30, 9.0), np.ones(10)]
+    m = summarize([dict(id="x", raw=raw, labels=lab, fps=10.0)], S.Normalizer(1.0, 1.0), 3.0, 1, 1, [0], warmup=8)
+    d = m["detection"]["tol_0"]
+    assert d["n_detected"] == 1 and d["n_censored"] == 1 and d["n_delay_segments"] == 0
+    assert m["per_video"][0]["delay_frames"] == [8]                              # first armed frame

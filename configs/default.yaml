@@ -14,7 +14,7 @@ data:
   flow_size: 128
 
 model:
-  name: unet               # unet (Phase 2 baseline) | dummy; dual-branch transformer comes in Phases 3-6
+  name: unet               # unet | spatial_vit | dual_branch | dummy
   hidden: 32               # dummy only
   base_channels: 32        # unet only
   # spatial_vit (Phase 3)
@@ -25,6 +25,12 @@ model:
   mlp_ratio: 4.0
   spatial_frames: 8        # most recent frames stacked in the patch embedding (1 = last frame only)
   residual: true           # predict the change from the last frame (zero-initialised output = copy-last-frame start)
+  # dual_branch (Phase 4): spatial branch = `depth` blocks on the last `dual_spatial_frames` frame(s)
+  dual_spatial_frames: 1
+  depth_temporal: 2        # divided space-time attention blocks in the temporal branch
+  depth_fusion: 2          # bidirectional cross-attention fusion blocks
+  temporal_input: flow     # flow | diff | both   (diff = frame differences, no optical flow needed)
+  flow_scale: 12.0         # flow is divided by this (matches the flow cache's clipping range)
 
 train:
   max_epochs: 40

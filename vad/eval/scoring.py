@@ -17,6 +17,7 @@ def patch_pool(err: np.ndarray, patch: int) -> np.ndarray:
 
 def topk_mean(patch_err: np.ndarray, k: int) -> np.ndarray:
     """[T,h,w] -> [T]: mean of the k largest patch errors of each frame."""
+    # A frame is scored by its worst patches, so a small anomaly is not averaged away by the background.
     flat = patch_err.reshape(len(patch_err), -1)
     k = max(1, min(k, flat.shape[1]))
     return np.partition(flat, flat.shape[1] - k, axis=1)[:, -k:].mean(axis=1)
@@ -49,6 +50,7 @@ def causal_smooth(x, window: int) -> np.ndarray:
     x = np.asarray(x, dtype=np.float64)
     if window <= 1 or len(x) == 0:
         return x.copy()
+    # Cumulative sums give every trailing-window average cheaply, and only use past frames.
     c = np.concatenate([[0.0], np.cumsum(x)])
     idx = np.arange(1, len(x) + 1)
     lo = np.maximum(idx - window, 0)
@@ -67,6 +69,7 @@ def alarm_signal(scores, thr: float, min_consecutive: int = 1) -> np.ndarray:
     out = np.zeros_like(above)
     run = 0
     for t, a in enumerate(above):
+        # Count how many frames in a row the score has been above the threshold.
         run = run + 1 if a else 0
         out[t] = run >= min_consecutive
     return out
