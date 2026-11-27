@@ -31,7 +31,13 @@ class VADLitModule(pl.LightningModule):
         l_grad = gradient_loss(pred, batch["target"])
         # Pixel error keeps colours right; gradient error keeps edges sharp.
         loss = l_int + self.cfg.train.gdl_weight * l_grad
+        # Skill = how far below the trivial "copy the last frame" loss we are (0 = no better, 1 = perfect).
+        with torch.no_grad():
+            last = batch["clip"][:, -1]
+            l_copy = F.mse_loss(last, batch["target"]) + self.cfg.train.gdl_weight * gradient_loss(last, batch["target"])
         on_step = stage == "train"
+        self.log(f"{stage}/loss_copy", l_copy, on_epoch=True, on_step=False)
+        self.log(f"{stage}/skill", 1.0 - loss.detach() / l_copy.clamp_min(1e-8), prog_bar=(stage == "val"), on_epoch=True, on_step=False)
         self.log(f"{stage}/loss", loss, prog_bar=True, on_epoch=True, on_step=on_step)
         self.log(f"{stage}/l_int", l_int, on_epoch=True, on_step=False)
         self.log(f"{stage}/l_grad", l_grad, on_epoch=True, on_step=False)

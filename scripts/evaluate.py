@@ -1,6 +1,6 @@
 """Evaluate a checkpoint under the proposal's ONLINE protocol.
 
-    python scripts/evaluate.py --ckpt <file or run folder> --dataset ped2 [--source ped2] [eval.smooth=5 ...]
+    python scripts/evaluate.py --ckpt <file or run folder | copy> --dataset ped2 [--source ped2] [eval.smooth=5 ...]
 
   --source   dataset whose held-out NORMAL videos fit the score normalizer and the alarm threshold
              (defaults to the dataset the model was trained on).
@@ -26,6 +26,7 @@ from vad.eval.runner import benchmark, predict_video
 from vad.eval.sweep import save_scores
 from vad.eval.scoring import causal_smooth, choose_threshold, fit_normalizer, topk_mean
 from vad.lit_module import VADLitModule
+from vad.models import build_model
 from vad.utils.paths import get_paths
 
 
@@ -61,14 +62,19 @@ def main():
     base = OmegaConf.merge(OmegaConf.load(args.config), OmegaConf.from_dotlist(overrides))
     ev = base.eval
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    ckpt = resolve_ckpt(args.ckpt)
-    model, cfg = load_model(ckpt, device)
+    if args.ckpt == "copy":      # zero-parameter baseline (predict the last frame); needs no checkpoint
+        cfg = OmegaConf.merge(base, {"model": {"name": "copy_last"}})
+        model, ckpt, tag = build_model(cfg).to(device).eval(), Path("copy_last"), "copy_last"
+    else:
+        ckpt = resolve_ckpt(args.ckpt)
+        model, cfg = load_model(ckpt, device)
+        tag = ckpt.parent.name
     cfg.paths = base.paths
     paths = get_paths(cfg)
     dc = cfg.data
     source = args.source or dc.dataset
     target = args.dataset or dc.dataset
-    name = args.name or f"{ckpt.parent.name}_{source}_to_{target}"
+    name = args.name or f"{tag}_{source}_to_{target}"
     out_dir = paths.results / "eval" / name
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"[eval] ckpt={ckpt}\n[eval] source={source} target={target} device={device}")

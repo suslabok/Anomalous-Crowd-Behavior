@@ -215,3 +215,85 @@ def test_benchmark_feeds_flow_to_flow_models():
     from vad.eval.runner import benchmark
     b = benchmark(_dual("flow"), 4, 64, torch.device("cpu"), n=1, flow_size=32)
     assert b["params"] > 0 and b["fps"] > 0
+
+
+# ---------------------------------------------------------------- "does it actually learn?" safeguards
+def test_copy_last_predictor_returns_last_frame():
+    from vad.models.copy_last import CopyLastPredictor
+    clip = torch.rand(2, 4, 3, 16, 16)
+    assert torch.equal(CopyLastPredictor()(clip), clip[:, -1])
+    assert sum(p.numel() for p in CopyLastPredictor().parameters()) == 0
+
+
+def test_head_init_modes():
+    from vad.models.spatial_predictor import SpatialPredictor
+    zero = SpatialPredictor(64, 16, 4, 4, 32, 1, 4, 2.0, residual=True, head_init="zero")
+    small = SpatialPredictor(64, 16, 4, 4, 32, 1, 4, 2.0, residual=True, head_init="small")
+    assert zero.out.weight.abs().max().item() == 0.0
+    assert 0 < small.out.weight.abs().max().item() < 0.1
+    with pytest.raises(ValueError):
+        SpatialPredictor(64, 16, 4, 4, 32, 1, 4, 2.0, residual=True, head_init="bogus")
+
+
+def _structured_batch(b=8, t=4, size=64, step=4):
+    """A random texture that moves `step` pixels per frame: predicting the next frame needs real motion modelling,
+    and copying the last frame leaves a clear error."""
+    import torch.nn.functional as F
+    width = size + (t + 2) * step
+    # smooth texture (low-resolution noise, upsampled): predictable, unlike white noise
+    base = F.interpolate(torch.rand(b, 3, size // 8, width // 8), size=(size, width), mode="bilinear", align_corners=False)
+    frames = [base[..., k * step:k * step + size] for k in range(t + 1)]
+    return torch.stack(frames[:t], dim=1), frames[t]
+
+
+@pytest.mark.parametrize("name,head_init", [("unet", "zero"), ("spatial_vit", "small"), ("dual_branch", "small")])
+def test_models_can_learn_to_beat_copy_last_frame_on_a_tiny_batch(name, head_init):
+    """Memorise 8 moving-texture clips: the loss must fall well below the copy-last-frame loss. A model that stays at
+    the copy baseline (the failure seen on the real data) fails here."""
+    import torch.nn.functional as F
+    from vad.models import build_model
+    cfg = OmegaConf.load("configs/default.yaml")
+    cfg.model.name, cfg.model.head_init, cfg.model.base_channels = name, head_init, 8
+    cfg.model.embed_dim, cfg.model.depth, cfg.model.heads, cfg.model.mlp_ratio = 32, 1, 4, 2.0
+    cfg.model.depth_temporal, cfg.model.depth_fusion, cfg.model.temporal_input = 1, 1, "diff"
+    cfg.model.patch = 8
+    cfg.data.clip_len, cfg.data.img_size = 4, 64
+    torch.manual_seed(0)
+    clip, target = _structured_batch()
+    model = build_model(cfg).train()
+    opt = torch.optim.AdamW(model.parameters(), lr=2e-3)
+    copy = F.mse_loss(clip[:, -1], target).item()
+    for _ in range(150):
+        opt.zero_grad()
+        loss = F.mse_loss(model(clip, None), target)
+        loss.backward()
+        opt.step()
+    assert loss.item() < 0.6 * copy, f"{name}: loss {loss.item():.4f} vs copy baseline {copy:.4f}"
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("name", ["spatial_vit", "dual_branch"])
+def test_mixed_precision_steps_actually_update_the_weights(name):
+    """With 16-bit mixed precision (the training default) the optimizer must really take steps: the output layer
+    starts at exactly zero and has to move."""
+    import torch.nn.functional as F
+    from vad.models import build_model
+    cfg = OmegaConf.load("configs/default.yaml")
+    cfg.model.name, cfg.model.head_init = name, "zero"
+    cfg.model.embed_dim, cfg.model.depth, cfg.model.heads, cfg.model.mlp_ratio = 32, 1, 4, 2.0
+    cfg.model.depth_temporal, cfg.model.depth_fusion, cfg.model.temporal_input, cfg.model.patch = 1, 1, "diff", 8
+    cfg.data.clip_len, cfg.data.img_size = 4, 64
+    model = build_model(cfg).cuda().train()
+    head = model.out if name == "spatial_vit" else model.head.out
+    assert head.weight.abs().max().item() == 0.0
+    opt, scaler = torch.optim.AdamW(model.parameters(), lr=1e-3), torch.amp.GradScaler("cuda")
+    clip, target = (x.cuda() for x in _structured_batch())
+    for _ in range(30):
+        opt.zero_grad()
+        with torch.autocast("cuda", dtype=torch.float16):
+            pred = model(clip, None)
+        scaler.scale(F.mse_loss(pred.float(), target)).backward()
+        scaler.step(opt)
+        scaler.update()
+    assert head.weight.abs().max().item() > 0, "optimizer steps were skipped or never reached the output layer"
+    assert scaler.get_scale() > 1.0

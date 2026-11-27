@@ -39,7 +39,7 @@ class DualBranchPredictor(nn.Module):
 
     def __init__(self, img_size=224, patch=16, clip_len=8, embed_dim=256, depth_spatial=6, depth_temporal=2,
                  depth_fusion=2, heads=8, mlp_ratio=4.0, spatial_frames=1, temporal_input="flow",
-                 flow_scale=12.0, residual=True):
+                 flow_scale=12.0, residual=True, head_init="zero"):
         super().__init__()
         if temporal_input not in _TIN_CH:
             raise ValueError(f"temporal_input must be one of {list(_TIN_CH)}")
@@ -49,7 +49,7 @@ class DualBranchPredictor(nn.Module):
                                        depth_temporal, heads, mlp_ratio)
         self.fusion = nn.ModuleList([CrossFusionBlock(embed_dim, heads, mlp_ratio) for _ in range(depth_fusion)])
         self.merge = nn.Sequential(nn.Linear(2 * embed_dim, embed_dim), nn.LayerNorm(embed_dim))
-        self.head = TokenDecoder(embed_dim, patch, zero_init=residual)
+        self.head = TokenDecoder(embed_dim, patch, zero_init=residual, head_init=head_init)
 
     def _motion_input(self, clip, flow):
         parts = []

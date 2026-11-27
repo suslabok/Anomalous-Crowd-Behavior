@@ -24,7 +24,8 @@ model:
   heads: 8
   mlp_ratio: 4.0
   spatial_frames: 8        # most recent frames stacked in the patch embedding (1 = last frame only)
-  residual: true           # predict the change from the last frame (zero-initialised output = copy-last-frame start)
+  residual: true           # predict the change from the last frame
+  head_init: zero          # zero (start exactly at copy-last-frame) | small (small random output layer)
   # dual_branch (Phase 4): spatial branch = `depth` blocks on the last `dual_spatial_frames` frame(s)
   dual_spatial_frames: 1
   depth_temporal: 2        # divided space-time attention blocks in the temporal branch

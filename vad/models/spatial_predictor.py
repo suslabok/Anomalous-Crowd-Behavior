@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 
+from vad.models.decoder import init_head
 from vad.models.vit import SpatialBranch
 
 
@@ -15,7 +16,7 @@ class SpatialPredictor(nn.Module):
     starts from the 'copy the last frame' predictor."""
 
     def __init__(self, img_size=224, patch=16, clip_len=8, spatial_frames=8, embed_dim=256, depth=6, heads=8,
-                 mlp_ratio=4.0, residual=True):
+                 mlp_ratio=4.0, residual=True, head_init="zero"):
         super().__init__()
         self.k, self.residual = min(spatial_frames, clip_len), residual
         self.branch = SpatialBranch(img_size, patch, self.k, embed_dim, depth, heads, mlp_ratio)
@@ -29,8 +30,7 @@ class SpatialPredictor(nn.Module):
         self.decoder = nn.Sequential(*layers)
         self.out = nn.Conv2d(chs[-1], 3, 1)
         if residual:
-            nn.init.zeros_(self.out.weight)
-            nn.init.zeros_(self.out.bias)
+            init_head(self.out, head_init)
 
     def forward(self, clip, flow=None):               # clip: B,T,C,H,W ; flow unused until Phase 4
         b, t, c, h, w = clip.shape

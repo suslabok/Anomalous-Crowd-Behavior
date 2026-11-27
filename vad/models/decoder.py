@@ -3,10 +3,22 @@ import math
 import torch.nn as nn
 
 
+def init_head(conv, mode):
+    """Output-layer init for residual models. 'zero' starts exactly at 'copy the last frame' (but gives the rest of
+    the network no gradient until the head has moved); 'small' starts near it with gradients flowing from step 0."""
+    if mode == "zero":
+        nn.init.zeros_(conv.weight)
+    elif mode == "small":
+        nn.init.normal_(conv.weight, std=0.01)
+    else:
+        raise ValueError("head_init must be 'zero' or 'small'")
+    nn.init.zeros_(conv.bias)
+
+
 class TokenDecoder(nn.Module):
     """Token grid [B, N, D] -> pixel tensor [B, 3, H, W] by log2(patch) conv-transpose upsampling stages."""
 
-    def __init__(self, embed_dim, patch, zero_init=True):
+    def __init__(self, embed_dim, patch, zero_init=True, head_init="zero"):
         super().__init__()
         stages = int(math.log2(patch))
         assert 2 ** stages == patch, "patch must be a power of two"
@@ -18,8 +30,7 @@ class TokenDecoder(nn.Module):
         self.decoder = nn.Sequential(*layers)
         self.out = nn.Conv2d(chs[-1], 3, 1)
         if zero_init:
-            nn.init.zeros_(self.out.weight)
-            nn.init.zeros_(self.out.bias)
+            init_head(self.out, head_init)
 
     def forward(self, tokens, grid):
         b = tokens.shape[0]

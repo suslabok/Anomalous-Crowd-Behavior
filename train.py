@@ -75,6 +75,12 @@ def main():
     if "weights_only" in inspect.signature(trainer.fit).parameters:
         fit_kw["weights_only"] = False   # our own checkpoints; torch>=2.6 defaults to True
     trainer.fit(VADLitModule(cfg), train_dl, val_dl, ckpt_path=resume, **fit_kw)
+    skill = trainer.callback_metrics.get("val/skill")
+    if skill is not None:
+        print(f"[train] final val skill vs the 'copy the last frame' baseline: {float(skill):+.3f}")
+        if float(skill) < 0.05:
+            print("[warn] the model is barely better than copying the last frame, i.e. it has learned (almost) nothing. "
+                  "Run scripts/sanity_overfit.py to find out why before trusting any evaluation.")
 
 
 if __name__ == "__main__":
