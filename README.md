@@ -17,7 +17,7 @@ at 256x256. A training sample is `clip [L,3,H,W]` (frames t-L..t-1), `target [3,
 optional `flow [L-1,2,F,F]`. Evaluation yields one sample per frame (start replicate-padded), so scoring
 is causal by construction. `meta.fps` is the EFFECTIVE fps, used to convert Δt to seconds.
 
-## Evaluation 
+## Evaluation (Phase 2)
 `python scripts/evaluate.py --ckpt <run folder or .ckpt> --dataset ped2 --plots`
 - Frame score = mean of top-k patch errors, z-scored with NORMAL held-out source videos, causal trailing smoothing.
 - Alarm threshold = percentile of normal validation scores; fixed from the source dataset in zero-shot runs (`--source`).
@@ -43,7 +43,7 @@ the warm-up are counted as detected/missed but excluded from delay statistics.
   `python -m vad.data.flow ped2` then `data.flow_mode=precomputed` (the flow cache lives on local disk: rebuild each Colab session).
 Train: `python train.py data.dataset=ped2 model.name=dual_branch data.flow_mode=precomputed train.scheduler=cosine run_name=ped2_dual`
 
-### Is the model actually learning?
+### Is the model actually learning? (added after the Phase 4 run)
 Always compare against the zero-parameter baseline that predicts the last frame:
 `python scripts/evaluate.py --ckpt copy --dataset ped2`. Training now logs `val/skill` (0 = no better than copying) and prints
 a warning at the end if it is below 0.05. `scripts/sanity_overfit.py` memorises a few real clips and says whether a model can
